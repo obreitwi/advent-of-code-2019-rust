@@ -27,7 +27,7 @@ struct System {
 }
 
 impl Craft {
-    pub fn new(name: &str, orbits: &WrappedCraft) -> WrappedCraft {
+    pub fn _new(name: &str, orbits: &WrappedCraft) -> WrappedCraft {
         Rc::new(RefCell::new(Craft {
             name: String::from(name),
             orbits: Some(orbits.clone()),
@@ -148,9 +148,89 @@ impl System {
 
         num_orbits
     }
+
+    /// Find shortest path from parent of from to parent of to.
+    fn find_shortest_hops(&self, from: &str, to: &str) -> Option<usize> {
+        let from = self.crafts.get(from).expect("Did not find start.");
+        let to = self.crafts.get(to).expect("Did not find target.");
+
+        {
+            assert!(from.borrow().orbits.is_some());
+            assert!(to.borrow().orbits.is_some());
+        }
+
+        let name_target = to.borrow().orbits.clone().unwrap().borrow().name.clone();
+        let start = from.borrow().orbits.clone().unwrap();
+        let mut traveller = Traveller::new(start);
+
+        loop {
+            match traveller.pop() {
+                Some(current) => {
+                    let current_b = current.borrow();
+                    let name = current_b.name.clone();
+                    let hops: usize = *traveller
+                        .get_hops(&name)
+                        .expect("Error: No hops defined - should not happen!");
+                    if name == name_target {
+                        return Some(hops);
+                    }
+
+                    traveller.add_if_not_visited(current_b.orbits.clone(), hops);
+                    for trab in current_b.trabants.iter() {
+                        traveller.add_if_not_visited(Some(trab.clone()), hops);
+                    }
+                }
+                None => break,
+            }
+        }
+        None
+    }
 }
 
-fn print_wrapped_craft(craft: &WrappedCraft) -> String {
+struct Traveller {
+    visited: HashMap<String, usize>,
+    queue: Vec<WrappedCraft>,
+}
+
+impl Traveller {
+    fn new(start: WrappedCraft) -> Traveller {
+        let mut traveller = Traveller {
+            visited: HashMap::new(),
+            queue: Vec::new(),
+        };
+        traveller.visited.insert(start.borrow().name.clone(), 0);
+        traveller.queue.push(start);
+        traveller
+    }
+
+    fn add_if_not_visited(&mut self, craft: Option<WrappedCraft>, hops: usize) {
+        if let Some(craft) = craft {
+            let craft_b = craft.borrow();
+
+            let name = &craft_b.name;
+
+            let one_more_hop = hops + 1;
+
+            if !self.visited.contains_key(name) {
+                self.visited.insert(String::from(name), one_more_hop);
+                self.queue.push(craft.clone());
+            } else if one_more_hop < *self.visited.get(name).unwrap() {
+                self.visited.insert(String::from(name), one_more_hop);
+                panic!("FOUND A CIRCLE");
+            }
+        }
+    }
+
+    fn get_hops<'a>(&'a self, name: &str) -> Option<&'a usize> {
+        self.visited.get(name)
+    }
+
+    fn pop(&mut self) -> Option<WrappedCraft> {
+        self.queue.pop()
+    }
+}
+
+fn _print_wrapped_craft(craft: &WrappedCraft) -> String {
     let craft = craft.borrow();
     format!(
         "{} ({})",
@@ -176,4 +256,9 @@ fn main() {
 
     println!("Complete system contains {} crafts", system.num_crafts());
     println!("Number of orbits: {}", system.count_orbits());
+
+    println!(
+        "Shortest path from YOU to SAN: {:?}",
+        system.find_shortest_hops("YOU", "SAN")
+    );
 }
