@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use num::Integer;
 use std::fmt;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
@@ -77,8 +78,18 @@ impl Moons {
             pos: Vec::new(),
         }
     }
-
     fn debug() -> Self {
+        let mut moons = Self::new();
+
+        moons.add(-1, 0, 2);
+        moons.add(2, -10, -7);
+        moons.add(4, -8, 8);
+        moons.add(3, 5, -1);
+
+        moons
+    }
+
+    fn debug_second() -> Self {
         let mut moons = Self::new();
 
         moons.add(-8, -10, 0);
@@ -118,7 +129,7 @@ impl Moons {
 
     fn print(&self) {
         for idx in 0..self.pos.len() {
-            println!("#{} pos={} vel={}", idx, self.pos[idx], self.vel[idx]);
+            println!("#{} pos={} vel={}", idx + 1, self.pos[idx], self.vel[idx]);
         }
     }
 
@@ -144,25 +155,68 @@ impl Moons {
         (self.pos.clone(), self.vel.clone())
     }
 
+    fn reset_state(&mut self, state: MoonState) {
+        self.pos = state.0;
+        self.vel = state.1;
+    }
+
     fn find_previous_state(&mut self) -> usize {
-        let mut record: HashSet<MoonState> = HashSet::new();
+        let start = self.current_state();
+        let mut iterations = [0; 3];
+        iterations[0] = self.find_previous_state_in(|t| t.x);
+        self.reset_state(start.clone());
+        iterations[1] = self.find_previous_state_in(|t| t.y);
+        self.reset_state(start.clone());
+        iterations[2] = self.find_previous_state_in(|t| t.z);
+        self.reset_state(start.clone());
+
+        println!("Iterations in each dimension: {:?}", iterations);
+
+        iterations[0].lcm(&iterations[1]).lcm(&iterations[2])
+    }
+
+    fn find_previous_state_in<F>(&mut self, getter: F) -> usize
+    where
+        F: Fn(&Triple) -> i64,
+    {
+        // let mut record: HashSet<MoonState> = HashSet::new();
 
         let start = self.current_state();
-        record.insert(start);
+        // record.insert(start.clone());
 
         let mut iterations = 1;
         self.step();
 
-        while !record.contains(&self.current_state()) {
-            record.insert(self.current_state());
-            if (iterations + 1) % 100000 == 0 {
-                banner(format!("Iteration #{}:", iterations + 1).as_str());
-                self.print();
-            }
+        // while !record.contains(&self.current_state()) {
+        while !Self::check_equal_in(&start, &self.current_state(), &getter) {
+            // record.insert(self.current_state());
+            /*
+             * if (iterations + 1) % report_every == 0 {
+             *     banner(format!("Iteration #{}:", iterations + 1).as_str());
+             *     self.print();
+             * }
+             */
             self.step();
             iterations += 1;
         }
         iterations
+    }
+
+    fn check_equal_in<F>(left: &MoonState, right: &MoonState, getter: &F) -> bool
+    where
+        F: Fn(&Triple) -> i64,
+    {
+        let (left_pos, left_vel) = left;
+        let (right_pos, right_vel) = right;
+
+        left_pos
+            .iter()
+            .zip(right_pos.iter())
+            .all(|(l, r)| getter(l) == getter(r))
+            && left_vel
+                .iter()
+                .zip(right_vel.iter())
+                .all(|(l, r)| getter(l) == getter(r))
     }
 }
 
@@ -176,7 +230,7 @@ fn banner(banner: &str) {
 
 fn main() {
     {
-        let mut hs: HashSet<(Vec<Triple>, Vec<Triple>)> = HashSet::new();
+        let mut hs: HashSet<MoonState> = HashSet::new();
 
         hs.insert((
             vec![Triple::new(1, 2, 3), Triple::new(3, 4, 5)],
@@ -198,31 +252,50 @@ fn main() {
         for i in 0..1000 {
             // banner(format!("Iteration #{}:", i + 1).as_str());
             moons.step();
-            moons.print();
+            // moons.print();
         }
-        println!();
         println!();
         println!("Total energy: {}", moons.total_energy());
     }
     {
         let mut moons = Moons::debug();
-        let initial_state = moons.current_state();
-        let target = 4686774924_i64;
-        for i in 0..target {
-            if (i + 1) % 100000 == 0 {
-                banner(format!("Iteration #{} ({:.2}%)", i + 1, i as f64 / target as f64 * 100.0).as_str());
-                moons.print();
-            }
-            moons.step();
-        }
-        assert_eq!(initial_state, moons.current_state());
-        return
+        println!();
+        let num_iterations = moons.find_previous_state();
+        println!(
+            "Iterations after which the state repeats: {}",
+            num_iterations
+        );
+    }
+    {
+        let mut moons = Moons::debug_second();
+        // let initial_state = moons.current_state();
+        let target = 4686774924_usize;
+        assert_eq!(target, moons.find_previous_state())
+        /*
+         * for i in 0..target {
+         *     if (i + 1) % 100000000 == 0 {
+         *         banner(
+         *             format!(
+         *                 "Iteration #{} ({:.2}%)",
+         *                 i + 1,
+         *                 i as f64 / target as f64 * 100.0
+         *             )
+         *             .as_str(),
+         *         );
+         *         moons.print();
+         *     }
+         *     moons.step();
+         * }
+         */
+        // assert_eq!(initial_state, moons.current_state());
     }
     {
         let mut moons = Moons::input();
+        println!();
+        let num_iterations = moons.find_previous_state();
         println!(
             "Iterations after which the state repeats: {}",
-            moons.find_previous_state()
+            num_iterations
         );
     }
 }
