@@ -1,4 +1,4 @@
-use std::cmp::min;
+use std::cmp::{max,min};
 use std::collections::HashMap;
 use std::fs::read_to_string;
 use std::num::ParseIntError;
@@ -74,23 +74,64 @@ impl Workbench {
             .map(|r: Reaction| (r.output.name.clone(), r))
             .collect();
 
-        Workbench { producers }
+        Workbench {
+            producers,
+        }
     }
 
-    fn compute_fuel_requirements(&self) -> usize {
-        let mut stack: HashMap<String, usize> = HashMap::new();
-        let mut surplus: HashMap<String, usize> = HashMap::new();
-        stack.insert(String::from("FUEL"), 1);
+    fn compute_fuel_for_ore(&self, ore_available: usize) -> usize {
+        let mut fuel_min = 0;
+        let mut fuel_max = ore_available;
+        let mut fuel_current = 1;
 
-        while stack.len() > 1 || stack.keys().next().unwrap() != "ORE" {
+        loop {
+            let ore = self.compute_fuel(fuel_current);
+
+            if ore > ore_available
+            {
+                fuel_max = fuel_current;
+                let diff = (fuel_current - fuel_min)/2;
+                fuel_current -= max(1, diff);
+
+            }
+            else if ore < ore_available
+            {
+                fuel_min = fuel_current;
+                let diff = (fuel_max - fuel_current)/2;
+                fuel_current += max(1, diff);
+
+            }
+            else
+            {
+                // we accicdentally found the answer
+                break;
+            }
+            if fuel_current == fuel_min
+            {
+                break;
+            }
+        }
+        fuel_current
+    }
+
+    fn compute_fuel(&self, num_fuel: usize) -> usize {
+        let mut stack = HashMap::new();
+        let mut surplus = HashMap::new();
+
+        stack.insert(String::from("FUEL"), num_fuel);
+        while stack.len() > 1 || stack.keys().next().unwrap_or(&String::from("")) != "ORE" {
             /*
-             * eprintln!("Stack:");
+             * eprintln!("Stack (len: {}):", stack.len());
              * for elem in stack.iter() {
              *     println!("{:?}", elem);
              * }
              */
-            // can't produce new ore
-            let name = stack.keys().filter(|k| *k != "ORE").next().unwrap().clone();
+            let name = stack
+                .keys()
+                .filter(|k| *k != "ORE") // can't produce new ore
+                .next()
+                .unwrap()
+                .clone();
             let q_needed = stack.remove(&name).unwrap();
 
             // eprintln!("Computing {}", name);
@@ -103,52 +144,62 @@ impl Workbench {
             let q_produced = num_reactions * reaction.output.quantity;
 
             if q_produced > q_needed {
-                let prev = surplus.get(&name).unwrap_or(&0).clone();
-                surplus.insert(name.clone(), prev + (q_produced - q_needed));
+                let q_surplus = surplus.get(&name).unwrap_or(&0).clone();
+                surplus.insert(name.clone(), q_surplus + (q_produced - q_needed));
             }
 
             for input in reaction.input.iter() {
                 let needed = input.quantity * num_reactions;
                 let needed_total = stack.get(&input.name).unwrap_or(&0) + needed;
 
-                let present = surplus.remove(&input.name).unwrap_or(0);
+                let q_surplus = surplus.remove(&input.name).unwrap_or(0);
 
-                if present > needed_total {
-                    surplus.insert(input.name.clone(), present - needed_total);
-                } else {
-                    stack.insert(input.name.clone(), needed_total - present);
+                if q_surplus > needed_total {
+                    surplus.insert(input.name.clone(), q_surplus - needed_total);
+                } else if q_surplus < needed_total {
+                    stack.insert(input.name.clone(), needed_total - q_surplus);
                 }
             }
         }
 
-        eprintln!("{:?}", surplus);
+        // eprintln!("{:?}", surplus);
 
-        *stack.get("ORE").unwrap()
+        stack.remove("ORE").unwrap()
     }
 }
 
-fn run(filename: &str) {
+fn run_task_1(filename: &str) {
     let workbench = Workbench::new(filename);
     /*
      * for prod in workbench.producers.values() {
      *     println!("{:?}", prod);
      * }
      */
-    let ore_per_fuel = workbench.compute_fuel_requirements();
-    println!(
-        "{}: {} FUEL needed",
-        filename,
-        ore_per_fuel,
-    );
+    let ore_per_fuel = workbench.compute_fuel(1);
+    println!("{}: ORE-per-FUEL: {}", filename, ore_per_fuel,);
+}
 
-    println!("Could produce {} FUEL units", 1000000000000usize / ore_per_fuel);
+fn run_task_2(filename: &str) {
+    let workbench = Workbench::new(filename);
+
+    let ore_available = 1000000000000usize;
+    let fuel_possible = workbench.compute_fuel_for_ore(ore_available);
+
+    println!("{}: {} ORE could produce {} FUEL", filename, ore_available, fuel_possible);
 }
 
 fn main() {
-    run("example_01.txt");
-    run("example_02.txt");
-    run("large_01.txt");
-    run("large_02.txt");
-    run("large_03.txt");
-    run("input.txt");
+    run_task_1("example_01.txt");
+    run_task_1("example_02.txt");
+    run_task_1("large_01.txt");
+    run_task_1("large_02.txt");
+    run_task_1("large_03.txt");
+    run_task_1("input.txt");
+
+    run_task_2("example_01.txt");
+    run_task_2("example_02.txt");
+    run_task_2("large_01.txt");
+    run_task_2("large_02.txt");
+    run_task_2("large_03.txt");
+    run_task_2("input.txt");
 }
