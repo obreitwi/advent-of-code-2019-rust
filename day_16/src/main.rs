@@ -1,3 +1,4 @@
+use std::collections::{HashSet, VecDeque};
 use std::fs::read_to_string;
 
 fn get_pattern(needed_len: usize, pos: usize) -> Vec<i64> {
@@ -24,16 +25,18 @@ fn get_pattern(needed_len: usize, pos: usize) -> Vec<i64> {
     output
 }
 
-fn fft_phase(input: Vec<i64>, patterns: &Vec<Vec<i64>>) -> Vec<i64> {
-    let mut output = Vec::with_capacity(input.len());
-    let len = input.len();
-    for i in 0..len {
+fn fft_phase(values: &mut [i64], offset: usize) {
+    let len = values.len();
+    for i in offset..len {
         // eprintln!("On element {}/{}", i, len);
-        let pattern = &patterns[i];
-        let next: i64 = input.iter().zip(pattern).map(|(i, p)| i * p).sum();
-        output.push(next.abs() % 10);
+        let pattern = get_pattern(len, i);
+        let next: i64 = values[i..]
+            .iter()
+            .zip(&pattern[i..])
+            .map(|(i, p)| i * p)
+            .sum();
+        values[i] = next.abs() % 10;
     }
-    output
 }
 
 fn read_str(input: &str) -> Vec<i64> {
@@ -50,18 +53,14 @@ fn read_input(filename: &str) -> Vec<i64> {
     read_str(&raw)
 }
 
-fn flawed_frequency_transmission(input: Vec<i64>, n: usize) -> Vec<i64> {
-    let mut input = input;
-    let patterns: Vec<Vec<i64>> = (0..input.len())
-        .map(|i| get_pattern(input.len(), i))
-        .collect();
+fn flawed_frequency_transmission(input: &mut [i64], n: usize, offset: usize) {
+    eprintln!("Length: {}", input.len());
     for _i in 0..n {
         // eprintln!("Iteration {}/{}", i, n);
         // eprintln!("Iteration #{} (input): {:?}", i, input);
-        input = fft_phase(input, &patterns);
+        fft_phase(input, offset);
         // eprintln!("Iteration #{} (output): {:?}", i, input);
     }
-    input
 }
 
 fn fft_to_string(input: &[i64]) -> String {
@@ -76,32 +75,92 @@ fn print_fft(input: &[i64]) {
     println!("{}", fft_to_string(input));
 }
 
-fn fft_repeated(input: &Vec<i64>, repetitions: usize, num_iterations: usize) -> String {
-    let input = input.repeat(repetitions);
+fn get_needed_indices(len_vec: usize, slice_start: usize, slice_len: usize) -> Vec<usize> {
+    let mut used_idx: HashSet<usize> = HashSet::new();
+    let mut to_check = VecDeque::new();
+
+    for idx in slice_start..slice_start + slice_len {
+        to_check.push_back(idx);
+    }
+    while to_check.len() > 0 {
+        let idx = to_check.pop_front().unwrap();
+
+        used_idx.insert(idx);
+
+        let pattern = get_pattern(len_vec, idx);
+        for idx in pattern
+            .iter()
+            .enumerate()
+            .filter(|(_, factor)| **factor != 0)
+            .map(|(idx, _)| idx)
+            .filter(|idx| !used_idx.contains(idx))
+        {
+            to_check.push_back(idx);
+        }
+    }
+
+    let mut retval: Vec<usize> = used_idx.iter().map(|i| *i).collect();
+    retval.sort();
+    retval
+}
+
+/*
+ * fn fft_slice(input: &Vec<i64>, num_iterations: usize, slice_start: usize, slice_len: usize) -> Vec<i64>
+ * {
+ *     // TODO calculate which elements from the input we need
+ *     input
+ * }
+ */
+
+fn fft_repeated(input: &[i64], repetitions: usize, num_iterations: usize) -> String {
+    let mut input = input.repeat(repetitions);
     let offset: usize = fft_to_string(&input[..7])
         .parse()
         .expect("Could not determine offset.");
-    let after = flawed_frequency_transmission(input, num_iterations);
-    fft_to_string(&after[offset..offset + 8])
+    let len = input.len();
+
+    if offset < len / 2 {
+        panic!("Offset is in the first half of the array.");
+    }
+    for _ in 0..num_iterations {
+        let mut sum = 0;
+        for i in (offset..input.len()).rev()
+        {
+            sum += input[i];
+            input[i] = sum.abs() % 10;
+        }
+    }
+    // eprintln!("Offset/length: {}/{}", offset, input.len());
+    fft_to_string(&input[offset..offset + 8])
 }
 
 fn main() {
     let num_iterations = 100;
-    {
-        let input = read_input("input.txt");
-        let after = flawed_frequency_transmission(input, num_iterations);
+    if true {
+        let mut input = read_input("input.txt");
+        flawed_frequency_transmission(&mut input[..], num_iterations, 0);
         // println!("After {} iterations of FFT:", num_iterations);
-        print_fft(&after[..8]);
+        print_fft(&input[..8]);
     }
     // part 2
-    {
+    if false {
         for i in 1..11 {
-            let input = read_input("input.txt").repeat(i);
-            let after = flawed_frequency_transmission(input, num_iterations);
-            print_fft(&after[..8]);
+            let mut input = read_input("input.txt").repeat(i);
+            flawed_frequency_transmission(&mut input[..], num_iterations, 0);
+            print_fft(&input[..8]);
         }
     }
     if false {
+        let input = read_input("input.txt");
+        let offset: usize = fft_to_string(&input[..7])
+            .parse()
+            .expect("Could not determine offset.");
+        println!(
+            "Number of indices needed: {}",
+            get_needed_indices(input.len() * 10000, offset, 7).len()
+        );
+    }
+    if true {
         let input = read_input("input.txt");
         println!("{}", fft_repeated(&input, 10000, 100));
     }
@@ -120,43 +179,43 @@ mod tests {
 
     #[test]
     fn example_01() {
-        let input = read_str("80871224585914546619083218645595");
+        let mut input = read_str("80871224585914546619083218645595");
         let num_iterations = 100;
-        let after = flawed_frequency_transmission(input, num_iterations);
-        assert!(fft_to_string(&after).starts_with("24176176"));
+        flawed_frequency_transmission(&mut input[..], num_iterations, 0);
+        assert!(fft_to_string(&input).starts_with("24176176"));
     }
 
     #[test]
     fn example_02() {
-        let input = read_str("19617804207202209144916044189917");
+        let mut input = read_str("19617804207202209144916044189917");
         let num_iterations = 100;
-        let after = flawed_frequency_transmission(input, num_iterations);
-        assert!(fft_to_string(&after).starts_with("73745418"));
+        flawed_frequency_transmission(&mut input[..], num_iterations, 0);
+        assert!(fft_to_string(&input).starts_with("73745418"));
     }
 
     #[test]
     fn example_03() {
-        let input = read_str("69317163492948606335995924319873");
+        let mut input = read_str("69317163492948606335995924319873");
         let num_iterations = 100;
-        let after = flawed_frequency_transmission(input, num_iterations);
-        assert!(fft_to_string(&after).starts_with("52432133"));
+        flawed_frequency_transmission(&mut input[..], num_iterations, 0);
+        assert!(fft_to_string(&input).starts_with("52432133"));
     }
 
     #[test]
     fn example_repeated_01() {
-        let input = read_str("03036732577212944063491565474664");
-        assert_eq!(fft_repeated(&input, 10000, 100), "84462026");
+        let mut input = read_str("03036732577212944063491565474664");
+        assert_eq!(fft_repeated(&mut input[..], 10000, 100), "84462026");
     }
 
     #[test]
     fn example_repeated_02() {
-        let input = read_str("02935109699940807407585447034323");
-        assert_eq!(fft_repeated(&input, 10000, 100), "78725270");
+        let mut input = read_str("02935109699940807407585447034323");
+        assert_eq!(fft_repeated(&mut input[..], 10000, 100), "78725270");
     }
 
     #[test]
     fn example_repeated_03() {
-        let input = read_str("03081770884921959731165446850517");
-        assert_eq!(fft_repeated(&input, 10000, 100), "53553731");
+        let mut input = read_str("03081770884921959731165446850517");
+        assert_eq!(fft_repeated(&mut input[..], 10000, 100), "53553731");
     }
 }
