@@ -29,6 +29,30 @@ pub enum Direction {
     East,
 }
 
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+pub enum Turn {
+    Left,
+    Right,
+}
+
+impl Turn {
+    pub fn all() -> &'static [Self] {
+        use Turn::*;
+        static VARIANTS: &'static [Turn] = &[Left, Right];
+        VARIANTS
+    }
+}
+
+impl Into<String> for Turn {
+    fn into(self) -> String {
+        use Turn::*;
+        match self {
+            Right => String::from("R"),
+            Left => String::from("L"),
+        }
+    }
+}
+
 impl Position {
     pub fn step(&self, dir: &Direction) -> Self {
         use Direction::*;
@@ -60,6 +84,37 @@ impl Direction {
             South => North,
             West => East,
             East => West,
+        }
+    }
+
+    pub fn to_turn(&self, other: &Self) -> Turn {
+        use Direction::*;
+        use Turn::*;
+        match (self, other) {
+            (North, West) => Right,
+            (North, East) => Left,
+            (South, East) => Right,
+            (South, West) => Left,
+            (West, North) => Right,
+            (West, South) => Left,
+            (East, South) => Right,
+            (East, North) => Left,
+            (_, _) => panic!("Unsupported turn!"),
+        }
+    }
+
+    pub fn turn(&self, turn: &Turn) -> Direction {
+        use Direction::*;
+        use Turn::*;
+        match (self, turn) {
+            (North, Right) => East,
+            (North, Left) => West,
+            (South, Right) => West,
+            (South, Left) => East,
+            (West, Right) => North,
+            (West, Left) => South,
+            (East, Right) => South,
+            (East, Left) => North,
         }
     }
 }
