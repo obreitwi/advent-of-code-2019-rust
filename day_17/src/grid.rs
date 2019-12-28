@@ -35,6 +35,16 @@ pub enum Turn {
     Right,
 }
 
+impl Dimensions {
+    pub fn width(&self) -> i64 {
+        self.x_max - self.x_min
+    }
+
+    pub fn height(&self) -> i64 {
+        self.y_max - self.y_min
+    }
+}
+
 impl Turn {
     pub fn all() -> &'static [Self] {
         use Turn::*;

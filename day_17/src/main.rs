@@ -1,5 +1,5 @@
-use std::cmp::{max, min};
-use std::collections::{HashMap, HashSet, VecDeque};
+use itertools::Itertools;
+use std::collections::HashMap;
 use std::convert::From;
 use std::default::Default;
 use std::fmt;
@@ -146,184 +146,226 @@ impl Robot {
         }
         vec
     }
-}
 
-fn consolidate(vec: &[String]) -> [Vec<String>; 4] {
-    let get_range = || (2..11);
-    let forbidden = [String::from("A"), String::from("B"), String::from("C")];
-    let check_contains_abc =
-        |v: &[String]| -> bool { forbidden.iter().any(|forbidden| v.contains(forbidden)) };
+    fn warn_other_robots(&mut self) -> TapeElem {
+        let tour = self.get_complete_tour();
 
-    for len_a in get_range() {
-        let repl_a = &vec[..len_a];
-        let replaced_a = replace_subvector(vec, repl_a, "A");
+        let commands = robot_cmds::encode(&tour[..]);
 
-        for len_b in get_range() {
-            if replaced_a.len() < len_b + 1 {
-                continue;
-            }
-            let repl_b = &replaced_a[1..len_b + 1];
+        self.computer.reset();
 
-            if check_contains_abc(repl_b) {
-                continue;
-            }
+        self.computer.set(0, 2);
 
-            let replaced_b = replace_subvector(&replaced_a, repl_b, "B");
-
-            for len_c in get_range() {
-                if replaced_b.len() < len_c + 2 {
-                    continue;
-                }
-
-                let repl_c = &replaced_b[2..len_c + 2];
-
-                if check_contains_abc(repl_b) {
-                    continue;
-                }
-
-                let replaced_c = replace_subvector(&replaced_b, repl_c, "C");
-
-                if !replaced_c.iter().all(|c| forbidden.contains(c)) {
-                    continue;
-                } else {
-                    return [
-                        repl_a.to_vec(),
-                        repl_b.to_vec(),
-                        repl_c.to_vec(),
-                        replaced_c,
-                    ];
-                }
-            }
+        for cmd in commands.iter() {
+            self.supply_command(cmd);
         }
-    }
-    panic!("Could not find assignment for A B C.")
-}
+        self.computer.supply_input('y' as TapeElem);
+        self.computer.supply_input('\n' as TapeElem);
 
-fn consolidate_v1(vec: &[String]) -> Vec<String> {
-    let retval = vec;
+        let mut printed_newline = false;
+        let mut perfrom_clear_screen = false;
 
-    let (size, start) = find_repeating_best(retval);
-    println!("size: {}", size);
-    let retval = replace_subvector(retval, &retval[start..start + size], "A");
-    println!("After A: {:?}", retval);
+        if false {
+            while !self.computer.is_finished() {
+                self.computer.execute_n(10000);
+                while let Some(c) = self.computer.get_output() {
+                    if perfrom_clear_screen {
+                        clear_screen();
+                        perfrom_clear_screen = false;
+                    }
 
-    let (size, start) = find_repeating_best(&retval[1..]);
-    let start = start + 1;
-    println!("size: {}", size);
-    let retval = replace_subvector(&retval[..], &retval[start..start + size], "B");
-    println!("After B: {:?}", retval);
+                    print!("{}", Tile::from(c));
 
-    let (size, start) = find_repeating_best(&retval[2..]);
-    let start = start + 2;
-    println!("size: {}", size);
-    let retval = replace_subvector(&retval[..], &retval[start..start + size], "C");
-    println!("After C: {:?}", retval);
-
-    retval
-}
-
-fn replace_subvector(vec: &[String], to_replace: &[String], label: &str) -> Vec<String> {
-    let mut retval = Vec::new();
-    let mut idx = 0;
-
-    // eprintln!("Replacing {:?} in {:?}", to_replace, vec);
-
-    while idx + to_replace.len() < vec.len() {
-        if vec[idx..idx + to_replace.len()] == *to_replace {
-            retval.push(String::from(label));
-            idx += to_replace.len();
-        } else {
-            retval.push(String::from(&vec[idx]));
-            idx += 1;
-        }
-    }
-    retval
-}
-
-fn find_repeating_best(vec: &[String]) -> (usize, usize) {
-    let (mut rv_size_replaced, mut rv_len, mut rv_offset) = (std::usize::MAX, 0, 0);
-
-    for offset in 0..vec.len() {
-        for len in (2..vec.len() + 1 - offset).rev() {
-            if len % 2 != 0 {
-                continue;
-            }
-
-            let replacement = &vec[offset..offset + len];
-            if [String::from("A"), String::from("B"), String::from("C")]
-                .iter()
-                .any(|forbidden| replacement.contains(forbidden))
-            {
-                continue;
-            }
-
-            if !(replacement[0] == "R" || replacement[0] == "L") {
-                continue;
-            }
-
-            match find_repeating_step(&vec[1..], replacement) {
-                Some(idx) => {
-                    let idx = idx + 1;
-                    let replaced = replace_subvector(&vec[..], &vec[idx..idx + len], "<replaced>");
-                    // eprintln!("Replaced {:?} -> length: {}", replaced, replaced.len());
-                    if replaced.len() < rv_size_replaced {
-                        rv_size_replaced = replaced.len();
-                        rv_len = len;
-                        rv_offset = idx;
+                    if c == ('\n' as TapeElem) {
+                        if !printed_newline {
+                            printed_newline = true;
+                        } else {
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                            printed_newline = false;
+                            perfrom_clear_screen = true;
+                        }
+                    } else {
+                        printed_newline = false;
                     }
                 }
+            }
+        }
+        self.computer.execute();
+        let mut output = None;
+        while let Some(c) = self.computer.get_output() {
+            match output {
                 None => {}
-            }
+                Some(old) => print!("{}", Tile::from(old)),
+            };
+            output = Some(c);
         }
+        output.expect("Computer did not produce output.")
     }
-    if rv_size_replaced < std::usize::MAX {
-        (rv_len, rv_offset)
-    } else {
-        panic!("Did not find repeating substring!");
-    }
-}
 
-/// Find repeating sub-vector and return its size
-fn find_repeating(vec: &[String]) -> (usize, usize) {
-    for len in (2..vec.len() + 1).rev() {
-        if len % 2 != 0 {
-            continue;
-        }
-
-        let replacement = &vec[..len];
-        if [String::from("A"), String::from("B"), String::from("C")]
+    fn supply_command(&mut self, cmd: &[String]) {
+        let mut num_inputs = 0;
+        for c in cmd
             .iter()
-            .any(|forbidden| replacement.contains(forbidden))
+            .interleave(std::iter::repeat(&String::from(",")).take(cmd.len() - 1))
         {
-            continue;
-        }
-
-        if !(replacement[0] == "R" || replacement[0] == "L") {
-            continue;
-        }
-
-        match find_repeating_step(&vec[1..], replacement) {
-            Some(idx) => {
-                return (len, idx + 1);
+            for input in c.chars() {
+                num_inputs += 1;
+                let input = input as TapeElem;
+                // eprintln!("[#{}] Supplying: {} (raw: {})", num_inputs, c, input);
+                self.computer.supply_input(input);
             }
-            None => {}
         }
+        num_inputs += 1;
+        // eprintln!("[#{}] Supplying: \\n", num_inputs);
+        self.computer.supply_input('\n' as TapeElem);
+        assert!(num_inputs <= 20);
+        // eprintln!();
     }
-    panic!("Did not find repeating substring!");
 }
 
-/// Search for `to_find` in `base` and return its starting position if found
-fn find_repeating_step(base: &[String], to_find: &[String]) -> Option<usize> {
-    if base.len() < to_find.len() {
-        return None;
-    }
-    let idx_limit = base.len() - to_find.len();
-    for idx in 0..idx_limit {
-        if base[idx..idx + to_find.len()] == to_find[..] {
-            return Some(idx);
+mod robot_cmds {
+    use itertools::Itertools;
+
+    pub fn encode(vec: &[String]) -> [Vec<String>; 4] {
+        let get_range = || (2..13).filter(|i| i % 2 == 0);
+        let forbidden = [String::from("A"), String::from("B"), String::from("C")];
+
+        for len_a in get_range() {
+            let (repl_a, replaced_a) = match check_replacement(vec, len_a, "A", &[]) {
+                None => continue,
+                Some(x) => x,
+            };
+
+            for len_b in get_range() {
+                let (repl_b, replaced_b) = match check_replacement(&replaced_a, len_b, "B", &["A"])
+                {
+                    None => continue,
+                    Some(x) => x,
+                };
+
+                for len_c in get_range() {
+                    let (repl_c, replaced_c) =
+                        match check_replacement(&replaced_b, len_c, "C", &["A", "B"]) {
+                            None => continue,
+                            Some(x) => x,
+                        };
+
+                    if !replaced_c.iter().all(|c| forbidden.contains(c)) {
+                        // eprintln!("{:?} does not consist of only A B C.", replaced_c);
+                        continue;
+                    } else {
+                        return [
+                            replaced_c,
+                            repl_a.to_vec(),
+                            repl_b.to_vec(),
+                            repl_c.to_vec(),
+                        ];
+                    }
+                }
+            }
         }
+        panic!("Could not find assignment for A B C.")
     }
-    None
+
+    pub fn cmd_to_string(cmd: &[String]) -> String {
+        let mut retval = String::new();
+        for part in cmd
+            .iter()
+            .interleave(std::iter::repeat(&String::from(",")).take(cmd.len() - 1))
+        {
+            retval.push_str(part);
+        }
+        retval
+    }
+
+    fn replace_subvector(vec: &[String], to_replace: &[String], label: &str) -> Vec<String> {
+        let mut retval = Vec::new();
+        let mut idx = 0;
+
+        // eprintln!("Replacing {:?} in {:?}", to_replace, vec);
+
+        while idx < vec.len() {
+            if idx + to_replace.len() <= vec.len()
+                && vec[idx..idx + to_replace.len()] == *to_replace
+            {
+                retval.push(String::from(label));
+                idx += to_replace.len();
+            } else {
+                retval.push(String::from(&vec[idx]));
+                idx += 1;
+            }
+        }
+        retval
+    }
+
+    fn check_replacement(
+        original: &[String],
+        repl_len: usize,
+        label: &str,
+        replaced_labels: &[&str],
+    ) -> Option<(Vec<String>, Vec<String>)> {
+        let check_contains_forbidden = |v: &[String]| -> bool {
+            replaced_labels
+                .iter()
+                .any(|forbidden| v.contains(&String::from(*forbidden)))
+        };
+
+        let max_cmd_len = 20;
+
+        // eprintln!("Trying len: {}", repl_len);
+        let mut repl: Option<&[String]> = None;
+
+        if original.len() <= repl_len {
+            return None;
+        }
+
+        for offset in 0..(original.len() - repl_len) {
+            let val = &original[offset..repl_len + offset];
+            repl = Some(val);
+            if !check_contains_forbidden(val) {
+                break;
+            }
+        }
+        if let None = repl {
+            return None;
+        }
+        let repl = match repl {
+            Some(repl) => repl,
+            None => return None,
+        };
+
+        if check_contains_forbidden(repl) {
+            // eprintln!("{:?} contains {:?}", repl, replaced_labels);
+            return None;
+        }
+
+        if cmd_to_string(repl).len() > max_cmd_len {
+            // eprintln!("Too long: {}", cmd_to_string(repl_b));
+            return None;
+        }
+
+        let replaced = replace_subvector(&original, repl, label);
+        // eprintln!("Programm {}: {:?} (replaced: {:?}", label, repl, replaced);
+        return Some((repl.to_vec(), replaced));
+    }
+
+    pub fn reconstruct(
+        main: &[String],
+        prog_a: &[String],
+        prog_b: &[String],
+        prog_c: &[String],
+    ) -> Vec<String> {
+        let mut retval: Vec<String> = Vec::new();
+        for routine in main.iter() {
+            match routine.as_str() {
+                "A" => retval.extend_from_slice(prog_a),
+                "B" => retval.extend_from_slice(prog_b),
+                "C" => retval.extend_from_slice(prog_c),
+                _ => panic!("Invalid funciton in main function!"),
+            };
+        }
+        retval
+    }
 }
 
 fn clear_screen() {
@@ -342,5 +384,22 @@ fn main() {
     println!("{:?}", tour);
     println!("Length best tour: {}", tour.len());
 
-    println!("{:?}", consolidate(&tour[..]));
+    let encoded_tour = robot_cmds::encode(&tour[..]);
+    println!("{:?}", encoded_tour);
+    let reconstructed = robot_cmds::reconstruct(
+        &encoded_tour[0],
+        &encoded_tour[1],
+        &encoded_tour[2],
+        &encoded_tour[3]
+    );
+    for (i, (l, r)) in tour.iter().zip(reconstructed.iter()).enumerate()
+    {
+        println!("#{}: ({}, {})", i, l, r);
+    }
+    assert_eq!(
+        tour,
+        reconstructed
+    );
+
+    println!("{:?}", robot.warn_other_robots());
 }
