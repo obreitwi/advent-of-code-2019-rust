@@ -27,23 +27,22 @@ struct Door(char);
 #[derive(Debug)]
 struct Maze {
     grid: Grid<Tile>,
-    entrance: Position,
+    entrances: Vec<Position>,
     keys: HashMap<Key, Position>,
     doors: HashMap<Door, Position>,
     cache_reachable: HashMap<MazeState, HashMap<MazeState, usize>>,
-    cache_lower_bound: HashMap<MazeState, usize>,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 struct MazeState {
     /// current position
-    pos: Position,
+    pos: Vec<Position>,
     /// keys in possession
     keys: BTreeSet<Key>,
 }
 
 impl MazeState {
-    fn from_pos(pos: Position) -> MazeState {
+    fn from_pos(pos: Vec<Position>) -> MazeState {
         MazeState {
             pos,
             keys: BTreeSet::new(),
@@ -137,14 +136,20 @@ impl Maze {
                 }
             }
         }
+        let entrances: Vec<Position> = grid
+            .iter()
+            .filter(|(_, t)| **t == Tile::Entrance)
+            .map(|(p, _)| p.clone())
+            .collect();
+
+        assert!(entrances.len() > 0, "No entrances found!");
 
         Maze {
             grid,
-            entrance: entrance.expect("Maze did not contain entrance."),
+            entrances,
             keys,
             doors,
             cache_reachable: HashMap::new(),
-            cache_lower_bound: HashMap::new(),
         }
     }
 
@@ -164,12 +169,15 @@ impl Maze {
 
         let mut state_to_distance = HashMap::new();
 
-        let mut to_explore: VecDeque<(Position, usize)> = VecDeque::new();
+        let mut to_explore: VecDeque<(Position, usize, usize)> = VecDeque::new();
 
-        to_explore.push_back((state.pos, 0));
+        for (idx, pos) in state.pos.iter().enumerate()
+        {
+            to_explore.push_back((pos.clone(), idx, 0));
+        }
         let mut explored = HashSet::new();
 
-        while let Some((current, dist)) = to_explore.pop_front() {
+        while let Some((current, idx, dist)) = to_explore.pop_front() {
             explored.insert(current);
             match self.grid.get(&current) {
                 Tile::Wall => {
@@ -185,7 +193,7 @@ impl Maze {
                     if !state.keys.contains(&k) {
                         let mut new_state: MazeState = state.clone();
                         new_state.keys.insert(k);
-                        new_state.pos = self.keys.get(&k).expect("Key not present!").clone();
+                        new_state.pos[idx] = self.keys.get(&k).expect("Key not present!").clone();
                         state_to_distance.insert(new_state, dist);
                         continue; // we don't continue exploring after we encountered a key
                     }
@@ -195,7 +203,7 @@ impl Maze {
             for d in Direction::all() {
                 let new_pos = current.step(d);
                 if !explored.contains(&new_pos) {
-                    to_explore.push_back((new_pos, dist + 1));
+                    to_explore.push_back((new_pos, idx, dist + 1));
                 }
             }
         }
@@ -204,47 +212,13 @@ impl Maze {
         state_to_distance
     }
 
-    fn get_lower_bound(&mut self, state: &MazeState) -> usize {
-        match self.cache_lower_bound.get(state) {
-            Some(lb) => *lb,
-            None => {
-                let lb = self.compute_lower_bound(state);
-                self.cache_lower_bound.insert(state.clone(), lb);
-                lb
-            }
-        }
-    }
-
-    /// Get a lower bound for the remaining keys, ignoring any walls
-    fn compute_lower_bound(&self, state: &MazeState) -> usize {
-        let mut current = state.pos;
-        let mut keys_left = self.get_keys_left(state);
-        let mut total = 0;
-        for _ in 0..(keys_left.len()) {
-            let distances: Vec<usize> = keys_left.iter().map(|p| current.mh(&p)).collect();
-
-            let idx = argmin(&mut distances.iter());
-            total += distances[idx];
-            current = keys_left.remove(idx);
-        }
-        total
-    }
-
-    fn get_keys_left(&self, state: &MazeState) -> Vec<Position> {
-        self.keys
-            .iter()
-            .filter(|(key, pos)| !state.keys.contains(&key))
-            .map(|(_, pos)| pos.clone())
-            .collect()
-    }
-
     fn get_shortest_path_keys(&mut self) -> usize {
         let mut stack: Vec<MazeState> = Vec::new();
 
         let mut shortest = std::usize::MAX;
         let mut visited: HashMap<MazeState, usize> = HashMap::new();
 
-        let ms = MazeState::from_pos(self.entrance);
+        let ms = MazeState::from_pos(self.entrances.clone());
         stack.push(ms.clone());
         visited.insert(ms, 0);
 
@@ -254,10 +228,9 @@ impl Maze {
             let dist = visited.get(&ms).unwrap().clone();
             assert!(uniq_states_visited.insert((ms.clone(), dist)));
             eprint!(
-                "\r\rStack size: {} (Cache size reachable/lb|uniq: {}/{}|{})",
+                "\r\rStack size: {} (Cache size / uniq states: {}/{})",
                 stack.len(),
                 self.cache_reachable.len(),
-                self.cache_lower_bound.len(),
                 uniq_states_visited.len()
             );
 
@@ -281,16 +254,12 @@ impl Maze {
                         Some(old) => {
                             if *old > dist {
                                 visited.insert(new_ms.clone(), dist);
-                                if !stack.contains(new_ms)
-                                {
+                                if !stack.contains(new_ms) {
                                     stack.push(new_ms.clone());
                                 }
                             }
                         }
                         None => {
-                            if self.get_lower_bound(new_ms) > shortest {
-                                continue;
-                            }
                             visited.insert(new_ms.clone(), dist);
                             stack.push(new_ms.clone());
                         }
@@ -301,19 +270,6 @@ impl Maze {
 
         shortest
     }
-}
-
-fn argmin<R: PartialOrd, T: Iterator<Item = R>>(iter: &mut T) -> usize {
-    let mut arg = 0;
-    let mut min = iter.next().expect("Iterator cannot be empty!");
-
-    for (i, elem) in iter.enumerate() {
-        if elem < min {
-            arg = i + 1; // we took the first element in the beginning
-            min = elem;
-        }
-    }
-    arg
 }
 
 fn clear_screen() {

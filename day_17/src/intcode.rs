@@ -5,9 +5,10 @@ use std::fs::read_to_string;
 #[derive(Debug, Clone)]
 pub struct Intcode {
     tape: Vec<TapeElem>,
+    tape_init: Vec<TapeElem>,
     pos: usize,
     current: Option<Instruction>,
-    input: Option<TapeElem>,
+    input: VecDeque<TapeElem>,
     output: VecDeque<TapeElem>,
     finished: bool,
     relative_base: TapeElem,
@@ -129,10 +130,9 @@ impl Instruction {
         let value = match self.op {
             Operation::Add => Store(params[0] + params[1]),
             Operation::Multiply => Store(params[0] * params[1]),
-            Operation::Input => match tape.input {
+            Operation::Input => match tape.input.pop_front() {
                 None => Pause,
                 Some(value) => {
-                    tape.input = None;
                     Store(value)
                 }
             },
@@ -202,10 +202,11 @@ impl Instruction {
 impl Intcode {
     pub fn new(tape: Vec<i64>) -> Intcode {
         Intcode {
+            tape_init: tape.clone(),
             tape,
             pos: 0,
             current: None,
-            input: None,
+            input: VecDeque::new(),
             output: VecDeque::new(),
             finished: false,
             relative_base: 0,
@@ -269,6 +270,15 @@ impl Intcode {
         Instruction { op, params }
     }
 
+    pub fn execute_n(&mut self, n: usize) -> bool {
+        for _ in 0..n {
+            if !self.step() {
+                break;
+            }
+        }
+        self.finished
+    }
+
     /// Execute tape and return whether we have finished or not.
     pub fn execute(&mut self) -> bool {
         while self.step() {
@@ -284,7 +294,7 @@ impl Intcode {
 
     /// Supply input that is consumed by input instruction
     pub fn supply_input(&mut self, input: TapeElem) {
-        self.input = Some(input);
+        self.input.push_back(input);
     }
 
     pub fn set(&mut self, idx: usize, value: TapeElem)
@@ -364,5 +374,12 @@ impl Intcode {
         }
         self.current = None;
         true
+    }
+
+    pub fn reset(&mut self) 
+    {
+        self.pos = 0;
+        self.finished = false;
+        self.tape = self.tape_init.clone();
     }
 }
