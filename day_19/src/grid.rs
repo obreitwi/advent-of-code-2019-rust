@@ -14,7 +14,7 @@ pub struct Grid<T> {
 }
 
 #[derive(Debug)]
-struct Dimensions {
+pub struct Dimensions {
     x_min: i64,
     x_max: i64,
     y_min: i64,
@@ -143,6 +143,11 @@ where
         }
     }
 
+    pub fn len(&self) -> usize
+    {
+        self.grid.len()
+    }
+
     pub fn get(&self, pos: &Position) -> T {
         match self.grid.get(pos) {
             None => Default::default(),
@@ -158,7 +163,7 @@ where
         self.grid.insert(pos, tile);
     }
 
-    fn get_dims(&self) -> Dimensions {
+    pub fn get_dims(&self) -> Dimensions {
         let mut x_min = std::i64::MAX;
         let mut y_min = std::i64::MAX;
         let mut x_max = -std::i64::MAX;
