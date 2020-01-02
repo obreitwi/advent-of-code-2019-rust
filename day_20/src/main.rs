@@ -26,6 +26,13 @@ struct Portal {
     /// direction in which entrance lies
     dir_entrance: Direction,
     dir_entrance_sibling: Direction,
+    level_change: LevelChange,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+enum LevelChange {
+    Upwards,
+    Downwards,
 }
 
 const LEN_PORTAL_LABEL: usize = 2;
@@ -41,6 +48,36 @@ struct Door(char);
 struct Maze {
     grid: Grid<Tile>,
     portals: HashMap<PortalLabel, [Portal; 2]>,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+struct MazeState {
+    pos: Position,
+    level: usize,
+}
+
+impl MazeState {
+    fn step(&self, dir: &Direction) -> Self {
+        MazeState {
+            pos: self.pos.step(dir),
+            level: self.level,
+        }
+    }
+
+    fn up(&self) -> Self {
+        MazeState {
+            pos: self.pos,
+            level: self.level + 1,
+        }
+    }
+
+    fn down(&self) -> Self {
+        assert!(self.level > 0, "Cannot go lower than level 0");
+        MazeState {
+            pos: self.pos,
+            level: self.level - 1,
+        }
+    }
 }
 
 impl From<char> for Tile {
@@ -129,12 +166,28 @@ impl Portal {
             "Found more than one entrance for Portal!"
         );
 
+        let dims = grid.get_dims();
+
+        // distinguish inner and outter portals
+        let distinguish = |pos: Position| -> LevelChange {
+            if pos.x - 1 == dims.x_min
+                || pos.x + 1 == dims.x_max
+                || pos.y - 1 == dims.y_min
+                || pos.y + 1 == dims.y_max
+            {
+                LevelChange::Downwards
+            } else {
+                LevelChange::Upwards
+            }
+        };
+
         let portal_a = Portal {
             label,
             pos: portal_pos[0].0,
             pos_sibling: portal_pos[1].0,
             dir_entrance: portal_pos[0].1,
             dir_entrance_sibling: portal_pos[1].1,
+            level_change: distinguish(portal_pos[0].0),
         };
         let portal_b = Portal {
             label,
@@ -142,7 +195,15 @@ impl Portal {
             pos_sibling: portal_pos[0].0,
             dir_entrance: portal_pos[1].1,
             dir_entrance_sibling: portal_pos[0].1,
+            level_change: distinguish(portal_pos[1].0),
         };
+
+        if label != ['A', 'A'] {
+            assert_ne!(
+                portal_a.level_change, portal_b.level_change,
+                "Portals do not point in different directions!"
+            );
+        }
 
         [portal_a, portal_b]
     }
@@ -272,14 +333,14 @@ impl Maze {
 
         queue.push_back((self.get_entrance(), 0));
         visited.insert(self.get_entrance());
+        // blacklist entrance and exit portals
         visited.insert(self.get_portal_entrance().pos);
 
         let exit = self.get_exit();
 
         while let Some((pos, dist)) = queue.pop_front() {
             // eprint!("\rCurrent stack length: {}", queue.len());
-            if pos == exit
-            {
+            if pos == exit {
                 return dist;
             }
 
@@ -293,9 +354,9 @@ impl Maze {
                             queue.push_back((pos, dist + 1));
                         }
                     }
-                    Tile::Portal(portal) => {
+                    Tile::Portal(portal) if ![['A', 'A'], ['Z', 'Z']].contains(&portal.label) => {
+                        let pos = portal.get_entrance_sibling();
                         if !visited.contains(&pos) {
-                            let pos = portal.get_entrance_sibling();
                             queue.push_back((pos, dist + 1));
                             visited.insert(pos);
                         }
@@ -303,13 +364,66 @@ impl Maze {
                     _ => {}
                 }
             }
-            /*
-             * eprintln!();
-             * for item in queue.iter()
-             * {
-             *     eprintln!("{:?}", item);
-             * }
-             */
+        }
+        panic!("Did not reach exit!");
+    }
+
+    fn get_shortest_path_recursive(&mut self) -> usize {
+        let mut queue: VecDeque<(MazeState, usize)> = VecDeque::new();
+
+        let mut visited: HashSet<MazeState> = HashSet::new();
+
+        let start = MazeState {
+            pos: self.get_entrance(),
+            level: 0,
+        };
+        queue.push_back((start, 0));
+        visited.insert(start);
+
+        let exit = MazeState {
+            pos: self.get_exit(),
+            level: 0,
+        };
+
+        while let Some((state, dist)) = queue.pop_front() {
+            // eprint!("\rCurrent stack length: {}", queue.len());
+            if state == exit {
+                return dist;
+            }
+
+            for dir in Direction::all() {
+                let state = state.step(dir);
+
+                match self.grid.get(&state.pos) {
+                    Tile::Way => {
+                        if !visited.contains(&state) {
+                            visited.insert(state);
+                            queue.push_back((state, dist + 1));
+                        }
+                    }
+                    // regular portal - not start/exit
+                    Tile::Portal(portal) if ![['A', 'A'], ['Z', 'Z']].contains(&portal.label) => {
+                        let mut state = state;
+                        match (portal.level_change, state.level) {
+                            (LevelChange::Upwards, _) => {
+                                state = state.up();
+                            }
+                            (LevelChange::Downwards, l) if l > 0 => {
+                                state = state.down();
+                            }
+                            _ => {
+                                continue;
+                            }
+                        }
+                        state.pos = portal.get_entrance_sibling();
+                        if !visited.contains(&state) {
+                            queue.push_back((state, dist + 1));
+                            visited.insert(state);
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
         panic!("Did not reach exit!");
     }
@@ -332,11 +446,13 @@ fn main() {
             .expect("Filename not provided."),
     );
     maze.grid.print(|_: &Position| -> Option<String> { None });
-    for portals in maze.portals.iter()
-    {
-        println!("{:?}", portals);
-    }
+    /*
+     * for portals in maze.portals.iter() {
+     *     println!("{:?}", portals);
+     * }
+     */
     println!("\nShortest: {}", maze.get_shortest_path());
+    println!("\nShortest (recursive): {}", maze.get_shortest_path_recursive());
 }
 
 #[cfg(test)]
@@ -354,5 +470,11 @@ mod tests {
     fn example_02() {
         let mut maze = Maze::new("example_02.txt");
         assert_eq!(maze.get_shortest_path(), 58);
+    }
+
+    #[test]
+    fn example_03() {
+        let mut maze = Maze::new("example_03.txt");
+        assert_eq!(maze.get_shortest_path_recursive(), 396);
     }
 }
