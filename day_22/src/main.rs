@@ -22,38 +22,10 @@ impl ShuffleOperation {
         let mut ops: Vec<ShuffleOperation> = Vec::new();
 
         for line in raw.lines() {
-            eprintln!("{}", line);
             ops.push(line.parse().expect("Could not parse operation."));
         }
 
         ops
-    }
-
-    /// Determine where a single index ends up during shuffling
-    fn rev_shuffle_single(&self, idx: usize, len: usize) -> usize {
-        use ShuffleOperation::*;
-
-        match *self {
-            DealIntoNewStack => len - 1 - idx,
-            CutN(n) => {
-                let n = if n < 0 {
-                    len - (-n) as usize
-                } else {
-                    n as usize
-                };
-
-                if idx < n {
-                    n + idx
-                } else {
-                    idx - n
-                }
-            }
-            DealWithIncrement(n) => {
-                let num_iterations = idx % n;
-
-                (num_iterations * len + idx) / n
-            }
-        }
     }
 
     fn shuffle(&self, mut stack: Vec<usize>) -> Vec<usize> {
@@ -84,6 +56,44 @@ impl ShuffleOperation {
         stack
     }
 
+    /// Determine where a single index ends up during shuffling
+    fn rev_shuffle_single(&self, idx: usize, len: usize) -> usize {
+        use ShuffleOperation::*;
+
+        match *self {
+            DealIntoNewStack => len - 1 - idx,
+            CutN(n) => {
+                let n = if n < 0 {
+                    len - (-n) as usize
+                } else {
+                    n as usize
+                };
+
+                if idx < len - n {
+                    n + idx
+                } else {
+                    idx + n - len
+                }
+            }
+            DealWithIncrement(n) => {
+                let mut num_iterations = 0;
+
+                while (num_iterations * len + idx) % n != 0 {
+                    num_iterations += 1;
+                }
+                // let num_iterations = idx % n;
+                let rev_idx = (num_iterations as u128 * len as u128 + idx as u128) / n as u128;
+                /*
+                 * eprintln!(
+                 *     "idx: {} / n: {} / num_iterations: {} / reverse index: {}",
+                 *     idx, n, num_iterations, rev_idx
+                 * );
+                 */
+                rev_idx as usize
+            }
+        }
+    }
+
     fn apply(ops: &Vec<ShuffleOperation>, mut vec: Vec<usize>) -> Vec<usize> {
         for op in ops.iter() {
             vec = op.shuffle(vec);
@@ -94,7 +104,9 @@ impl ShuffleOperation {
     fn rev_apply_single(ops: &Vec<ShuffleOperation>, idx: usize, len: usize) -> usize {
         let mut idx = idx;
         for op in ops.iter() {
+            // let old = idx;
             idx = op.rev_shuffle_single(idx, len);
+            // eprintln!("{:?} transformed: {} -> {}", op, old, idx);
         }
         idx
     }
@@ -170,23 +182,38 @@ fn main() {
         let shuffle_times: usize = 101741582076661;
         let mut result = 2020;
 
-        let mut seen: HashSet<usize> = HashSet::new();
-        let mut order: Vec<usize> = Vec::new();
+        // let mut seen: HashSet<usize> = HashSet::new();
+        // let mut order: Vec<usize> = Vec::new();
 
         let stack = ShuffleOperation::reverse(&stack);
+        let start = std::time::Instant::now();
 
         for i in 0..shuffle_times {
-            if i % (shuffle_times / 1000) == 0 {
-                eprint!("\rProgress {}‰", i * 1000 / shuffle_times);
+            if i % 10000000 == 0 && i > 0 {
+                eprint!(
+                    "\rProgress {:e} [elapsed: {:?}, ETA: {:?} years, # seen {}]{}",
+                    i as f64 / shuffle_times as f64,
+                    start.elapsed(),
+                    start.elapsed().as_secs_f64() * (shuffle_times as f64)
+                        / (i as f64)
+                        / 3600.
+                        / 24.
+                        / 365.,
+                    0,
+                    // seen.len(),
+                    " ".repeat(10)
+                );
             }
             result = ShuffleOperation::rev_apply_single(&stack, result, len);
-            if seen.contains(&result) {
-                result = order[shuffle_times % seen.len()];
-                break;
-            } else {
-                order.push(result);
-                seen.insert(result);
-            }
+            /*
+             * if seen.contains(&result) {
+             *     result = order[shuffle_times % seen.len()];
+             *     break;
+             * } else {
+             *     order.push(result);
+             *     seen.insert(result);
+             * }
+             */
         }
         println!("\rCard in position 2020: {}", result);
     }
@@ -203,6 +230,7 @@ mod tests {
         let result: Vec<usize> = vec![0, 3, 6, 9, 2, 5, 8, 1, 4, 7];
 
         assert_eq!(result, ShuffleOperation::apply(&ops, vec));
+        test_reverse(&ops, &result);
     }
 
     #[test]
@@ -248,14 +276,29 @@ mod tests {
         test_reverse(&stack, &result);
     }
 
-    fn test_reverse(ops: &Vec<ShuffleOperation>, result: &Vec<usize>)
-    {
+    fn test_reverse(ops: &Vec<ShuffleOperation>, result: &Vec<usize>) {
         let rev = ShuffleOperation::reverse(ops);
 
-        for (idx, item) in result.iter().enumerate()
-        {
+        for (idx, item) in result.iter().enumerate() {
             println!("Checking index: {}", idx);
-            assert_eq!(*item, ShuffleOperation::rev_apply_single(&rev, idx, result.len()));
+            assert_eq!(
+                *item,
+                ShuffleOperation::rev_apply_single(&rev, idx, result.len())
+            );
+        }
+    }
+
+    #[test]
+    fn test_cut_n() {
+        let deck: Vec<usize> = (0..10).collect();
+        for n in 0..10 {
+            let ops = vec![ShuffleOperation::CutN(n)];
+
+            let result = ShuffleOperation::apply(&ops, deck.clone());
+
+            println!("{:?}", result);
+
+            test_reverse(&ops, &result);
         }
     }
 }
