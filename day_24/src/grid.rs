@@ -9,12 +9,12 @@ pub struct Position {
     pub y: i64,
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct Grid<T> {
     grid: HashMap<Position, T>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Dimensions {
     pub x_min: i64,
     pub x_max: i64,
@@ -34,6 +34,18 @@ pub enum Direction {
 pub enum Turn {
     Left,
     Right,
+}
+
+impl From<(i64, i64)> for Position {
+    fn from((x, y): (i64, i64)) -> Self {
+        Position { x, y }
+    }
+}
+
+impl From<(&i64, &i64)> for Position {
+    fn from((x, y): (&i64, &i64)) -> Self {
+        Position { x: *x, y: *y }
+    }
 }
 
 impl Dimensions {
@@ -145,6 +157,25 @@ where
         Grid {
             grid: HashMap::new(),
         }
+    }
+
+    pub fn from_dims(dims: &Dimensions, elem: T) -> Grid<T> {
+        let Dimensions {
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+        } = *dims;
+
+        let mut grid = HashMap::new();
+
+        for y in y_min..y_max + 1 {
+            for x in x_min..x_max + 1 {
+                grid.insert(Position { x, y }, elem);
+            }
+        }
+
+        Grid { grid }
     }
 
     pub fn get(&self, pos: &Position) -> T {
