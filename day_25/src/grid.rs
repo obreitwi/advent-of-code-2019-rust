@@ -1,5 +1,3 @@
-use simple_error::{bail, SimpleError};
-
 use std::cmp::{max, min};
 use std::collections::HashMap;
 use std::fmt;
@@ -180,11 +178,53 @@ where
         Grid { grid }
     }
 
+    /// Expand the grid (and the position if given)
+    pub fn expand(&mut self, at: Option<&mut Position>) {
+        let mut expanded = HashMap::new();
+        let keys: Vec<Position> = self.grid.keys().cloned().collect();
+        for pos in keys.iter() {
+            let v = self.grid.remove(&pos).unwrap();
+            expanded.insert(
+                Position {
+                    x: 2 * pos.x,
+                    y: 2 * pos.y,
+                },
+                v,
+            );
+        }
+        self.grid = expanded;
+
+        if let Some(at) = at
+        {
+            at.x *= 2;
+            at.y *= 2;
+        }
+    }
+
     pub fn get(&self, pos: &Position) -> T {
         match self.grid.get(pos) {
             None => Default::default(),
             Some(elem) => elem.clone(),
         }
+    }
+
+    pub fn get_in_direction(
+        &self,
+        mut pos: Position,
+        dir: &Direction,
+        max_steps: usize,
+    ) -> Option<(Position, T)> {
+        let mut num_steps = 0;
+        pos = pos.step(dir);
+        while let None = self.grid.get(&pos) {
+            pos = pos.step(dir);
+            num_steps += 1;
+
+            if num_steps >= max_steps {
+                return None;
+            }
+        }
+        Some((pos, self.grid.get(&pos).cloned().unwrap()))
     }
 
     pub fn get_existing(&self, pos: &Position) -> Option<T> {

@@ -136,6 +136,18 @@ struct RobotAdventure {
     pos: Position,
 }
 
+#[derive(Debug)]
+struct PotentialRoom {
+    /// Room found in the specified direction (with position)
+    reachable: Option<(Position, Room)>,
+
+    /// direction in which to go
+    dir: Option<Direction>,
+
+    /// first position in the given direction
+    origin: Position,
+}
+
 impl RobotAdventure {
     pub fn new(filename: &str) -> RobotAdventure {
         let pos = Position { x: 0, y: 0 };
@@ -151,15 +163,39 @@ impl RobotAdventure {
         self.code.is_finished()
     }
 
+    fn step(&self, dir: &Direction) -> PotentialRoom
+    {
+        let first_step = self.pos.step(&dir);
+        let reachable = match self.grid.get_in_direction(self.pos, dir, 1024)
+        {
+            Some((pos, Tile::Room(room))) => Some((pos, room)),
+            None => None,
+            _ => panic!("Grid did not return a room!"),
+        };
+
+        PotentialRoom{ reachable, dir: Some(dir.clone()), origin: self.pos }
+    }
+
     pub fn execute_cmd(&mut self, cmd: &str) {
-        if let Ok(dir) = str_to_dir(cmd.trim_end_matches("\n")) {
-            self.pos = self.pos.step(&dir);
+        let step = if let Ok(dir) = str_to_dir(cmd.trim_end_matches("\n")) {
+            Some(self.step(&dir))
         }
+        else {
+            None
+        };
+
+        eprintln!("Step: {:?}", step);
 
         self.supply_cmd(cmd);
         self.code.execute();
 
-        let output = self.get_output();
+        let output = if let Some(step) = step {
+            self.get_output_with_step(step)
+        }
+        else 
+        {
+            self.get_output()
+        };
 
         self.grid.print_custom(
             |pos: &Position| -> Option<char> {
@@ -178,17 +214,48 @@ impl RobotAdventure {
             self.code.supply_input(c as TapeElem);
         }
     }
-
-    pub fn get_output(&mut self) -> String {
+    fn get_output_with_step(&mut self, potential_room: PotentialRoom) -> String {
         let output = self.get_output_str();
 
         if let Ok(room) = output.parse() {
-            self.grid.add(self.pos, Tile::Room(room));
+            self.update_position_via_room(room, potential_room);
         } else {
             eprintln!("WARN: Did not find valid room!")
         }
-
         output
+    }
+
+    pub fn get_output(&mut self) -> String {
+        self.get_output_with_step(PotentialRoom{ reachable: None, dir: None, origin: self.pos })
+    }
+
+    fn update_position_via_room(&mut self, room: Room, potential_room: PotentialRoom)
+    {
+        self.pos = if let Some((pos, reachable)) = potential_room.reachable
+        {
+            if reachable != room
+            {
+                let mut origin = potential_room.origin;
+                self.grid.expand(Some(&mut origin));
+                origin.step(&potential_room.dir.unwrap())
+            }
+            else
+            {
+                pos
+            }
+        }
+        else{
+            if let Some(dir) = potential_room.dir
+            {
+                potential_room.origin.step(&dir)
+            }
+            else 
+            {
+                potential_room.origin
+            }
+        };
+
+        self.grid.add(self.pos, Tile::Room(room));
     }
 
     pub fn get_output_str(&mut self) -> String {
