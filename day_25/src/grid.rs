@@ -208,6 +208,37 @@ where
         }
     }
 
+    /// step in direction until condition is true
+    pub fn get_in_direction_until<F>(
+        &self,
+        mut pos: Position,
+        dir: &Direction,
+        max_steps: usize,
+        mut condition: F
+    ) -> Option<(Position, T)>
+        where F: FnMut(&T) -> bool
+    {
+        let mut num_steps = 0;
+        pos = pos.step(dir);
+        loop{
+            if let Some(current) = self.grid.get(&pos)
+            {
+                if condition(current)
+                {
+                    break;
+                }
+            }
+
+            pos = pos.step(dir);
+            num_steps += 1;
+
+            if num_steps >= max_steps {
+                return None;
+            }
+        }
+        Some((pos, self.grid.get(&pos).cloned().unwrap()))
+    }
+
     pub fn get_in_direction(
         &self,
         mut pos: Position,
@@ -228,7 +259,11 @@ where
     }
 
     pub fn get_existing(&self, pos: &Position) -> Option<T> {
-        self.grid.get(pos).map(|e| e.clone())
+        self.grid.get(pos).cloned()
+    }
+
+    pub fn get_existing_mut(&mut self, pos: &Position) -> Option<&mut T> {
+        self.grid.get_mut(pos)
     }
 
     pub fn add(&mut self, pos: Position, tile: T) {
@@ -254,6 +289,10 @@ where
             y_min,
             y_max,
         }
+    }
+
+    pub fn remove(&mut self, pos: &Position) -> Option<T> {
+        self.grid.remove(pos)
     }
 
     pub fn print(&self) {

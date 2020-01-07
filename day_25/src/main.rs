@@ -15,12 +15,16 @@ use grid::{Direction, Grid, Position};
 enum Tile {
     Empty,
     Room(Room),
+    Hallway(Directions),
 }
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+struct Directions(BTreeSet<Direction>);
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 struct Room {
     name: String,
-    doors: BTreeSet<Direction>,
+    doors: Directions,
 }
 
 impl FromStr for Room {
@@ -48,7 +52,7 @@ impl FromStr for Room {
         } else {
             Ok(Room {
                 name: name.to_string(),
-                doors,
+                doors: Directions(doors),
             })
         }
     }
@@ -80,30 +84,38 @@ impl fmt::Display for Tile {
         match self {
             Empty => write!(f, " "),
             Room(room) => write!(f, "{}", room),
+            Hallway(dirs) => write!(f, "{}", dirs),
         }
     }
 }
-
 impl fmt::Display for Room {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.doors)
+    }
+}
+
+impl fmt::Display for Directions {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use Direction::*;
-        let to_write = match self.doors.len() {
+        let Directions(dirs) = self;
+
+        let to_write = match dirs.len() {
             4 => "┼",
             3 => {
-                if !self.doors.contains(&North) {
+                if !dirs.contains(&North) {
                     "┬"
-                } else if !self.doors.contains(&South) {
+                } else if !dirs.contains(&South) {
                     "┴"
-                } else if !self.doors.contains(&West) {
+                } else if !dirs.contains(&West) {
                     "├"
                 } else {
                     "┤"
                 }
             }
             2 => {
-                let mut doors = self.doors.iter();
-                let first = doors.next().unwrap();
-                let second = doors.next().unwrap();
+                let mut dirs = dirs.iter();
+                let first = dirs.next().unwrap();
+                let second = dirs.next().unwrap();
 
                 match (first, second) {
                     (North, West) => "┘",
@@ -115,17 +127,37 @@ impl fmt::Display for Room {
                     _ => panic!("Ordering of Directions not as expected!"),
                 }
             }
-            1 => match self.doors.iter().next().unwrap() {
+            1 => match dirs.iter().next().unwrap() {
                 North => "╵",
                 South => "╷",
                 West => "╴",
                 East => "╶",
             },
             0 => " ",
-            _ => panic!("Room has no doors!"),
+            _ => panic!("No directions given!"),
         };
 
         f.write_str(to_write)
+    }
+}
+
+impl Directions {
+    pub fn new() -> Directions {
+        Directions(BTreeSet::new())
+    }
+
+    pub fn as_set(&self) -> &BTreeSet<Direction> {
+        let Self(dirs) = self;
+        dirs
+    }
+
+    pub fn by_set(&mut self) -> &mut BTreeSet<Direction> {
+        let Self(dirs) = self;
+        dirs
+    }
+
+    pub fn add(&mut self, dir: Direction) {
+        self.by_set().insert(dir);
     }
 }
 
@@ -163,37 +195,43 @@ impl RobotAdventure {
         self.code.is_finished()
     }
 
-    fn step(&self, dir: &Direction) -> PotentialRoom
-    {
-        let first_step = self.pos.step(&dir);
-        let reachable = match self.grid.get_in_direction(self.pos, dir, 1024)
-        {
+    fn step(&self, dir: &Direction) -> PotentialRoom {
+        let reachable = match self
+            .grid
+            .get_in_direction_until(self.pos, dir, 1024, |tile| {
+                if let Tile::Room(_) = tile {
+                    true
+                } else {
+                    false
+                }
+            }) {
             Some((pos, Tile::Room(room))) => Some((pos, room)),
             None => None,
             _ => panic!("Grid did not return a room!"),
         };
 
-        PotentialRoom{ reachable, dir: Some(dir.clone()), origin: self.pos }
+        PotentialRoom {
+            reachable,
+            dir: Some(dir.clone()),
+            origin: self.pos,
+        }
     }
 
     pub fn execute_cmd(&mut self, cmd: &str) {
         let step = if let Ok(dir) = str_to_dir(cmd.trim_end_matches("\n")) {
             Some(self.step(&dir))
-        }
-        else {
+        } else {
             None
         };
 
-        eprintln!("Step: {:?}", step);
+        // eprintln!("Step: {:?}", step);
 
         self.supply_cmd(cmd);
         self.code.execute();
 
         let output = if let Some(step) = step {
             self.get_output_with_step(step)
-        }
-        else 
-        {
+        } else {
             self.get_output()
         };
 
@@ -226,31 +264,108 @@ impl RobotAdventure {
     }
 
     pub fn get_output(&mut self) -> String {
-        self.get_output_with_step(PotentialRoom{ reachable: None, dir: None, origin: self.pos })
+        self.get_output_with_step(PotentialRoom {
+            reachable: None,
+            dir: None,
+            origin: self.pos,
+        })
     }
 
-    fn update_position_via_room(&mut self, room: Room, potential_room: PotentialRoom)
-    {
-        self.pos = if let Some((pos, reachable)) = potential_room.reachable
+    /// Expand and connect everything by Hallways
+    fn expand(&mut self, mut origin: &mut Position) {
+        self.grid.expand(Some(&mut origin));
+
+        // self.grid.print();
+
+        // clear hallways
         {
-            if reachable != room
-            {
-                let mut origin = potential_room.origin;
-                self.grid.expand(Some(&mut origin));
-                origin.step(&potential_room.dir.unwrap())
-            }
-            else
-            {
-                pos
+            let hallways: Vec<Position> = self
+                .grid
+                .iter()
+                .filter_map(|(pos, t)| {
+                    if let Tile::Hallway(_) = *t {
+                        Some(pos.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            for hw in hallways.iter() {
+                self.grid.remove(hw);
             }
         }
-        else{
-            if let Some(dir) = potential_room.dir
-            {
-                potential_room.origin.step(&dir)
+
+        let rooms: Vec<(Position, Room)> = self
+            .grid
+            .iter()
+            .filter_map(|(pos, t)| {
+                if let Tile::Room(r) = t {
+                    Some((pos.clone(), r.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // eprintln!("Rooms: {:?}", rooms);
+
+        for (origin, room) in rooms.iter() {
+            // eprintln!("{:?}", (origin, room));
+            for dir in room.doors.as_set().iter() {
+                let mut pos = origin.step(dir);
+                match self.grid.get_in_direction_until(pos, dir, 1024, |t| {
+                    if let Tile::Room(_) = *t {
+                        true
+                    } else {
+                        false
+                    }
+                }) {
+                    None => {
+                        // if there is nothing to expand to -> don't try
+                        continue;
+                    }
+                    Some((_, Tile::Room(r))) if !r.doors.as_set().contains(&dir.invert()) => {
+                        // if the room is not connected to our room -> don't try
+                        continue;
+                    }
+                    _ => {}
+                };
+                loop {
+                    match self.grid.get_existing_mut(&pos) {
+                        Some(Tile::Room(_)) => break,
+                        Some(Tile::Hallway(dirs)) => {
+                            dirs.add(dir.invert());
+                            // eprintln!("Added to hallway {:?} at {:?}", dirs, pos);
+                        }
+                        None => {
+                            let mut dirs = Directions::new();
+                            dirs.add(dir.invert());
+                            // eprintln!("Added hallway {:?} at {:?}", dirs, pos);
+                            self.grid.add(pos, Tile::Hallway(dirs));
+                        }
+                        Some(Tile::Empty) => {
+                            panic!("Grid should not contain explicit empty tiles.")
+                        }
+                    }
+                    pos = pos.step(dir);
+                }
             }
-            else 
-            {
+        }
+    }
+
+    fn update_position_via_room(&mut self, room: Room, potential_room: PotentialRoom) {
+        self.pos = if let Some((pos, reachable)) = potential_room.reachable {
+            if reachable != room {
+                let mut origin = potential_room.origin;
+                self.expand(&mut origin);
+                origin.step(&potential_room.dir.unwrap())
+            } else {
+                pos
+            }
+        } else {
+            if let Some(dir) = potential_room.dir {
+                potential_room.origin.step(&dir)
+            } else {
                 potential_room.origin
             }
         };
