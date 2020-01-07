@@ -1,6 +1,7 @@
+use clap::{App, Arg, crate_version};
 use simple_error::{bail, SimpleError};
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::io::{stdin, stdout, Write};
 use std::str::FromStr;
@@ -23,8 +24,9 @@ struct Directions(BTreeSet<Direction>);
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 struct Room {
-    name: String,
+    label: String,
     doors: Directions,
+    items: BTreeSet<String>,
 }
 
 impl FromStr for Room {
@@ -32,27 +34,35 @@ impl FromStr for Room {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut lines = s.lines().skip_while(|s| !s.starts_with("== "));
-        let name = match lines.by_ref().next() {
-            None => return Err(SimpleError::new("Did not find name for room.")),
-            Some(name) => name.trim_start_matches("== ").trim_end_matches(" =="),
+        let label = match lines.by_ref().next() {
+            None => return Err(SimpleError::new("Did not find label for room.")),
+            Some(label) => label.trim_start_matches("== ").trim_end_matches(" =="),
         };
 
+        let mut doors = BTreeSet::new();
         let mut lines = lines
             .skip_while(|s| !s.starts_with("Doors here lead:"))
             .skip(1);
-
-        let mut doors = BTreeSet::new();
         for dir in lines.by_ref().take_while(|s| s.starts_with("- ")) {
             let dir = str_to_dir(dir.trim_start_matches("- "))?;
             doors.insert(dir);
+        }
+
+        let mut items = BTreeSet::new();
+        let mut lines = lines
+            .skip_while(|s| !s.starts_with("Items here:"))
+            .skip(1);
+        for item in lines.by_ref().take_while(|s| s.starts_with("- ")) {
+            items.insert(String::from(item.trim_start_matches("- ")));
         }
 
         if doors.len() == 0 {
             Err(SimpleError::new("Did not find any doors."))
         } else {
             Ok(Room {
-                name: name.to_string(),
+                label: label.to_string(),
                 doors: Directions(doors),
+                items
             })
         }
     }
@@ -166,6 +176,7 @@ struct RobotAdventure {
     grid: Grid<Tile>,
     code: Intcode,
     pos: Position,
+    label_to_pos: HashMap<String, Position>,
 }
 
 #[derive(Debug)]
@@ -185,10 +196,16 @@ impl RobotAdventure {
         let pos = Position { x: 0, y: 0 };
         let mut code = Intcode::load(filename);
         let grid = Grid::new();
+        let label_to_pos = HashMap::new();
 
         code.execute();
 
-        RobotAdventure { pos, grid, code }
+        RobotAdventure {
+            pos,
+            grid,
+            code,
+            label_to_pos,
+        }
     }
 
     pub fn is_finished(&self) -> bool {
@@ -271,30 +288,11 @@ impl RobotAdventure {
         })
     }
 
-    /// Expand and connect everything by Hallways
-    fn expand(&mut self, mut origin: &mut Position) {
-        self.grid.expand(Some(&mut origin));
+    fn get_pos_by_label(&self, label: &str) -> Option<&Position> {
+        self.label_to_pos.get(label)
+    }
 
-        // self.grid.print();
-
-        // clear hallways
-        {
-            let hallways: Vec<Position> = self
-                .grid
-                .iter()
-                .filter_map(|(pos, t)| {
-                    if let Tile::Hallway(_) = *t {
-                        Some(pos.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            for hw in hallways.iter() {
-                self.grid.remove(hw);
-            }
-        }
-
+    fn rebuild_label_to_pos(&mut self) -> Vec<(Position, Room)> {
         let rooms: Vec<(Position, Room)> = self
             .grid
             .iter()
@@ -306,6 +304,24 @@ impl RobotAdventure {
                 }
             })
             .collect();
+
+        let mut label_to_pos = HashMap::new();
+
+        for (pos, room) in rooms.iter() {
+            label_to_pos.insert(room.label.clone(), pos.clone());
+        }
+
+        self.label_to_pos = label_to_pos;
+
+        rooms
+    }
+
+    /// Expand and connect everything by Hallways
+    fn expand(&mut self, mut origin: &mut Position) {
+        self.grid.expand(Some(&mut origin));
+
+        // self.grid.print();
+        let rooms = self.rebuild_label_to_pos();
 
         // eprintln!("Rooms: {:?}", rooms);
 
@@ -354,7 +370,10 @@ impl RobotAdventure {
     }
 
     fn update_position_via_room(&mut self, room: Room, potential_room: PotentialRoom) {
-        self.pos = if let Some((pos, reachable)) = potential_room.reachable {
+        self.pos = if let Some(pos) = self.get_pos_by_label(&room.label) {
+            eprintln!("Setting position to {:?} by label {}", pos, room.label);
+            pos.clone()
+        } else if let Some((pos, reachable)) = potential_room.reachable {
             if reachable != room {
                 let mut origin = potential_room.origin;
                 self.expand(&mut origin);
@@ -370,7 +389,12 @@ impl RobotAdventure {
             }
         };
 
-        self.grid.add(self.pos, Tile::Room(room));
+        if let None = self.get_pos_by_label(&room.label)
+        {
+            eprintln!("Adding room: {:?}", room);
+            self.label_to_pos.insert(room.label.clone(), self.pos);
+            self.grid.add(self.pos, Tile::Room(room));
+        }
     }
 
     pub fn get_output_str(&mut self) -> String {
@@ -385,9 +409,35 @@ impl RobotAdventure {
 }
 
 fn main() {
+    let matches = App::new("day 22")
+        .version(crate_version!())
+        .author("Oliver Breitwieser <oliver@breitwieser.eu>")
+        .about("Day 22 of Advent of Code")
+        .arg(
+            Arg::with_name("commands")
+                .short("c")
+                .long("command")
+                .value_name("CMD")
+                .help("Sets a custom config file")
+                .takes_value(true)
+                .multiple(true),
+        ).get_matches();
+
+    let cmds = match matches.args.get("commands")
+    {
+        Some(matched) => matched.vals.clone(),
+        None => Vec::new(),
+    };
+
     let mut robot = RobotAdventure::new("input.txt");
 
     println!("{}", robot.get_output());
+
+    for cmd in cmds.iter() {
+        let mut cmd = String::from(cmd.to_str().unwrap());
+        cmd.push('\n');
+        robot.execute_cmd(&cmd);
+    }
 
     while !robot.is_finished() {
         let mut s = String::new();
