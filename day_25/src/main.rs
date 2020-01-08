@@ -182,7 +182,7 @@ struct RobotAdventure {
 #[derive(Debug)]
 struct PotentialRoom {
     /// Room found in the specified direction (with position)
-    reachable: Option<(Position, Room)>,
+    reachable: Option<(Position, Tile)>,
 
     /// direction in which to go
     dir: Option<Direction>,
@@ -213,19 +213,15 @@ impl RobotAdventure {
     }
 
     fn step(&self, dir: &Direction) -> PotentialRoom {
-        let reachable = match self
+        let reachable = self
             .grid
             .get_in_direction_until(self.pos, dir, 1024, |tile| {
-                if let Tile::Room(_) = tile {
-                    true
-                } else {
+                if let Tile::Empty = tile {
                     false
+                } else {
+                    true
                 }
-            }) {
-            Some((pos, Tile::Room(room))) => Some((pos, room)),
-            None => None,
-            _ => panic!("Grid did not return a room!"),
-        };
+            });
 
         PotentialRoom {
             reachable,
@@ -371,10 +367,10 @@ impl RobotAdventure {
 
     fn update_position_via_room(&mut self, room: Room, potential_room: PotentialRoom) {
         self.pos = if let Some(pos) = self.get_pos_by_label(&room.label) {
-            eprintln!("Setting position to {:?} by label {}", pos, room.label);
+            // eprintln!("Setting position to {:?} by label {}", pos, room.label);
             pos.clone()
         } else if let Some((pos, reachable)) = potential_room.reachable {
-            if reachable != room {
+            if reachable != Tile::Room(room.clone()) {
                 let mut origin = potential_room.origin;
                 self.expand(&mut origin);
                 origin.step(&potential_room.dir.unwrap())
@@ -391,7 +387,7 @@ impl RobotAdventure {
 
         if let None = self.get_pos_by_label(&room.label)
         {
-            eprintln!("Adding room: {:?}", room);
+            // eprintln!("Adding room: {:?}", room);
             self.label_to_pos.insert(room.label.clone(), self.pos);
             self.grid.add(self.pos, Tile::Room(room));
         }
